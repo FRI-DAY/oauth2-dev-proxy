@@ -9,10 +9,8 @@ import (
 	"net/url"
 	"time"
 
-	"golang.org/x/net/publicsuffix"
+	"github.com/pkg/browser"
 )
-
-//https://github.com/pkg/browser
 
 func main() {
 	proxyAddr := ":8124"
@@ -22,7 +20,10 @@ func main() {
 		log.Fatalf("Failed to parse baseURL: %v", err)
 	}
 
-	jar, err := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
+	// We don't need a public suffix list for cookies - we only make requests
+	// to a single host, so there's no need to prevent cookies from being
+	// sent across domains.
+	jar, err := cookiejar.New(nil)
 	if err != nil {
 		log.Fatalf("Failed to create cookie jar: %v", err)
 	}
@@ -55,24 +56,14 @@ func main() {
 			}
 		}
 
-		w.Write([]byte(fmt.Sprintf(
-			"Authentication complete. You can now use the proxy at %s\n\n"+
-				"Upstream: %s\n\n"+
-				"You can close this window.",
-			proxyAddr, baseURL)))
-		log.Printf("Cookie: %+v", authCookie)
-		log.Printf("Response: %+v", resp)
-
 		reverseProxyDirector := func(r *http.Request) {
-			log.Printf("Original request: %+v", r)
 			r.Host = baseURL.Host
 			r.URL.Scheme = baseURL.Scheme
 			r.URL.Host = baseURL.Host
 
 			r.AddCookie(authCookie)
 
-			log.Printf("Forwarding request: %+v", r)
-			log.Printf("Request URI: %v", r.RequestURI)
+			log.Printf("Forwarding request: %v", r.RequestURI)
 		}
 
 		proxyHandler := &httputil.ReverseProxy{
@@ -85,12 +76,20 @@ func main() {
 		}
 		go proxyServer.ListenAndServe()
 
+		authCompleteText := fmt.Sprintf("Authentication complete. You can now use the proxy at %s\n\n"+
+			"Upstream: %s\n\n", proxyAddr, baseURL)
+
+		w.Write([]byte(authCompleteText + "You can close this window."))
+
+		log.Printf(authCompleteText +
+			"The proxy will automatically terminate in 12 hours (reauthentication required)")
 	})
 
 	server := &http.Server{
 		Addr:    ":8123",
 		Handler: serverMux,
 	}
+	// TODO check server is actually running to prevent sending auth code to another app
 	go server.ListenAndServe()
 
 	resp, err := client.Get(baseURL.String() + "/oauth2/start")
@@ -103,6 +102,12 @@ func main() {
 		log.Fatalf("Got empty identity provider URL in response: %+v", resp)
 	}
 
-	log.Printf("Go to %s", identityProviderURL)
-	time.Sleep(1 * time.Hour)
+	if err := browser.OpenURL(identityProviderURL); err != nil {
+		log.Printf("Failed to open browser, please go to %s", identityProviderURL)
+	}
+	log.Printf("Please authenticate in your browser via our identity provider.")
+
+	// TODO Fetch expiration date from cookie
+	time.Sleep(12 * time.Hour)
+	log.Printf("12 hours are up, please reauthenticate.")
 }

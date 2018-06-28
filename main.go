@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	proxyAddr := ":8124"
+	proxyAddr := "127.0.0.1:8124"
 
 	baseURL, err := url.Parse("https://SETME")
 	if err != nil {
@@ -86,7 +86,7 @@ func main() {
 	})
 
 	server := &http.Server{
-		Addr:    ":8123",
+		Addr:    "127.0.0.1:8123",
 		Handler: serverMux,
 	}
 	// TODO check server is actually running to prevent sending auth code to another app

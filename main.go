@@ -87,8 +87,8 @@ func main() {
 		}
 		go proxyServer.ListenAndServe()
 
-		authCompleteText := fmt.Sprintf("Authentication complete. You can now use the proxy at "+
-			"http://%s\n\n"+
+		authCompleteText := fmt.Sprintf("Authentication complete. You can now use the proxy.\n\n"+
+			"Proxy URL: http://%s\n"+
 			"Upstream: %s\n\n", proxyAddr, upstreamURL)
 
 		w.Write([]byte(authCompleteText + "You can close this window."))

@@ -7,6 +7,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/pkg/browser"
@@ -15,9 +16,19 @@ import (
 func main() {
 	proxyAddr := "127.0.0.1:8124"
 
-	baseURL, err := url.Parse("https://SETME")
+	if len(os.Args) != 2 {
+		fmt.Fprintf(os.Stderr,
+			"Usage: %s UPSTREAM_URL\n"+
+				"Example: %s https://proxy-dev.example.com\n\n"+
+				"Note: The oauth2_proxy running at UPSTREAM_URL must be configured with a\n"+
+				"      special redirect URL for this development proxy.\n",
+			os.Args[0], os.Args[0])
+		os.Exit(1)
+	}
+
+	upstreamURL, err := url.Parse(os.Args[1])
 	if err != nil {
-		log.Fatalf("Failed to parse baseURL: %v", err)
+		log.Fatalf("Failed to parse target URL: %v", err)
 	}
 
 	// We don't need a public suffix list for cookies - we only make requests
@@ -38,8 +49,8 @@ func main() {
 	serverMux := http.NewServeMux()
 	serverMux.HandleFunc("/oauth2/callback", func(w http.ResponseWriter, r *http.Request) {
 		realCallbackURL, _ := r.URL.Parse(r.URL.String())
-		realCallbackURL.Scheme = baseURL.Scheme
-		realCallbackURL.Host = baseURL.Host
+		realCallbackURL.Scheme = upstreamURL.Scheme
+		realCallbackURL.Host = upstreamURL.Host
 		// realCallbackURL.Path = "/oauth2/callback"
 
 		resp, err := client.Get(realCallbackURL.String())
@@ -57,9 +68,9 @@ func main() {
 		}
 
 		reverseProxyDirector := func(r *http.Request) {
-			r.Host = baseURL.Host
-			r.URL.Scheme = baseURL.Scheme
-			r.URL.Host = baseURL.Host
+			r.Host = upstreamURL.Host
+			r.URL.Scheme = upstreamURL.Scheme
+			r.URL.Host = upstreamURL.Host
 
 			r.AddCookie(authCookie)
 
@@ -76,8 +87,9 @@ func main() {
 		}
 		go proxyServer.ListenAndServe()
 
-		authCompleteText := fmt.Sprintf("Authentication complete. You can now use the proxy at %s\n\n"+
-			"Upstream: %s\n\n", proxyAddr, baseURL)
+		authCompleteText := fmt.Sprintf("Authentication complete. You can now use the proxy at "+
+			"http://%s\n\n"+
+			"Upstream: %s\n\n", proxyAddr, upstreamURL)
 
 		w.Write([]byte(authCompleteText + "You can close this window."))
 
@@ -92,7 +104,7 @@ func main() {
 	// TODO check server is actually running to prevent sending auth code to another app
 	go server.ListenAndServe()
 
-	resp, err := client.Get(baseURL.String() + "/oauth2/start")
+	resp, err := client.Get(upstreamURL.String() + "/oauth2/start")
 	if err != nil {
 		log.Fatalf("Request failed: %v", err)
 	}

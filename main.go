@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -31,6 +32,22 @@ func main() {
 		log.Fatalf("Failed to parse target URL: %v", err)
 	}
 
+	authCompleteNotice := fmt.Sprintf("Authentication complete. You can now use the proxy.\n\n"+
+		"Proxy URL: http://%s\n"+
+		"Upstream: %s\n\n", proxyAddr, upstreamURL)
+
+	authCookie := authenticate(upstreamURL, authCompleteNotice)
+
+	go runProxy(proxyAddr, upstreamURL, authCookie)
+
+	log.Printf("The proxy will automatically terminate in 12 hours (reauthentication required)")
+
+	// TODO Fetch expiration date from cookie
+	time.Sleep(12 * time.Hour)
+	log.Printf("12 hours are up, please reauthenticate.")
+}
+
+func authenticate(upstreamURL *url.URL, authCompleteNotice string) *http.Cookie {
 	// We don't need a public suffix list for cookies - we only make requests
 	// to a single host, so there's no need to prevent cookies from being
 	// sent across domains.
@@ -46,12 +63,13 @@ func main() {
 		},
 	}
 
+	authCookieCh := make(chan *http.Cookie)
+
 	serverMux := http.NewServeMux()
 	serverMux.HandleFunc("/oauth2/callback", func(w http.ResponseWriter, r *http.Request) {
 		realCallbackURL, _ := r.URL.Parse(r.URL.String())
 		realCallbackURL.Scheme = upstreamURL.Scheme
 		realCallbackURL.Host = upstreamURL.Host
-		// realCallbackURL.Path = "/oauth2/callback"
 
 		resp, err := client.Get(realCallbackURL.String())
 		if err != nil {
@@ -60,49 +78,25 @@ func main() {
 			return
 		}
 
-		var authCookie *http.Cookie
 		for _, c := range resp.Cookies() {
 			if c.Name == "_oauth2_proxy" {
-				authCookie = c
+				w.Write([]byte(authCompleteNotice + "You can close this window."))
+				authCookieCh <- c
+				break
 			}
 		}
-
-		reverseProxyDirector := func(r *http.Request) {
-			r.Host = upstreamURL.Host
-			r.URL.Scheme = upstreamURL.Scheme
-			r.URL.Host = upstreamURL.Host
-
-			r.AddCookie(authCookie)
-
-			log.Printf("Forwarding request: %v", r.RequestURI)
-		}
-
-		proxyHandler := &httputil.ReverseProxy{
-			Director: reverseProxyDirector,
-		}
-
-		proxyServer := &http.Server{
-			Addr:    proxyAddr,
-			Handler: proxyHandler,
-		}
-		go proxyServer.ListenAndServe()
-
-		authCompleteText := fmt.Sprintf("Authentication complete. You can now use the proxy.\n\n"+
-			"Proxy URL: http://%s\n"+
-			"Upstream: %s\n\n", proxyAddr, upstreamURL)
-
-		w.Write([]byte(authCompleteText + "You can close this window."))
-
-		log.Printf(authCompleteText +
-			"The proxy will automatically terminate in 12 hours (reauthentication required)")
 	})
 
 	server := &http.Server{
 		Addr:    "127.0.0.1:8123",
 		Handler: serverMux,
 	}
-	// TODO check server is actually running to prevent sending auth code to another app
-	go server.ListenAndServe()
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start auth callback server: %v", err)
+		}
+	}()
 
 	resp, err := client.Get(upstreamURL.String() + "/oauth2/start")
 	if err != nil {
@@ -119,7 +113,38 @@ func main() {
 	}
 	log.Printf("Please authenticate in your browser via our identity provider.")
 
-	// TODO Fetch expiration date from cookie
-	time.Sleep(12 * time.Hour)
-	log.Printf("12 hours are up, please reauthenticate.")
+	// Wait for authentication callback, see handler above
+	authCookie := <-authCookieCh
+
+	ctx, ctxCancelFn := context.WithTimeout(context.Background(), 1*time.Second)
+	_ = server.Shutdown(ctx)
+	ctxCancelFn()
+
+	log.Printf(authCompleteNotice)
+
+	return authCookie
+}
+
+func runProxy(addr string, upstreamURL *url.URL, authCookie *http.Cookie) {
+	director := func(r *http.Request) {
+		r.Host = upstreamURL.Host
+		r.URL.Scheme = upstreamURL.Scheme
+		r.URL.Host = upstreamURL.Host
+
+		r.AddCookie(authCookie)
+
+		log.Printf("Forwarding request: %v", r.RequestURI)
+	}
+
+	handler := &httputil.ReverseProxy{
+		Director: director,
+	}
+
+	proxyServer := &http.Server{
+		Addr:    addr,
+		Handler: handler,
+	}
+	if err := proxyServer.ListenAndServe(); err != nil {
+		log.Fatalf("Failed to start reverse proxy: %v", err)
+	}
 }

@@ -1,0 +1,11 @@
+builds:
+  - binary: oauth2-dev-proxy
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+archive:
+  # An archive just makes installation harder
+  format: binary

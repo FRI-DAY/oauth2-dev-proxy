@@ -78,13 +78,20 @@ func authenticate(upstreamURL *url.URL, authCompleteNotice string) *http.Cookie 
 			return
 		}
 
+		var authCookie *http.Cookie
 		for _, c := range resp.Cookies() {
 			if c.Name == "_oauth2_proxy" {
 				w.Write([]byte(authCompleteNotice + "You can close this window."))
-				authCookieCh <- c
+				authCookie = c
 				break
 			}
 		}
+		if authCookie == nil {
+			log.Printf("Response from oauth2_proxy:%v\n\n", resp)
+			log.Fatalf("Error: Expected _oauth2_proxy cookie not found in response " +
+				"from oauth2_proxy. Please restart the dev proxy and try again.")
+		}
+		authCookieCh <- authCookie
 	})
 
 	server := &http.Server{

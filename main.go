@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,30 +16,38 @@ import (
 )
 
 func main() {
-	proxyAddr := "127.0.0.1:8124"
+	proxyAddr := flag.String("addr", "127.0.0.1:8124",
+		"Listen on this address for reverse proxy requests")
 
-	if len(os.Args) != 2 {
+	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr,
-			"Usage: %s UPSTREAM_URL\n"+
+			"Usage: %s [flags] UPSTREAM_URL\n"+
 				"Example: %s https://proxy-dev.example.com\n\n"+
 				"Note: The oauth2_proxy running at UPSTREAM_URL must be configured with a\n"+
-				"      special redirect URL for this development proxy.\n",
+				"      special redirect URL for this development proxy.\n\n",
 			os.Args[0], os.Args[0])
+		flag.PrintDefaults()
+	}
+
+	flag.Parse()
+
+	if len(flag.Args()) != 1 {
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	upstreamURL, err := url.Parse(os.Args[1])
+	upstreamURL, err := url.Parse(flag.Args()[0])
 	if err != nil {
 		log.Fatalf("Failed to parse target URL: %v", err)
 	}
 
 	authCompleteNotice := fmt.Sprintf("Authentication complete. You can now use the proxy.\n\n"+
 		"Proxy URL: http://%s\n"+
-		"Upstream: %s\n\n", proxyAddr, upstreamURL)
+		"Upstream: %s\n\n", *proxyAddr, upstreamURL)
 
 	authCookie := authenticate(upstreamURL, authCompleteNotice)
 
-	go runProxy(proxyAddr, upstreamURL, authCookie)
+	go runProxy(*proxyAddr, upstreamURL, authCookie)
 
 	log.Printf("The proxy will automatically terminate in 12 hours (reauthentication required)")
 

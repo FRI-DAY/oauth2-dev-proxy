@@ -49,7 +49,7 @@ The proxy will automatically terminate in 12 hours (reauthentication required)
 
 Download the binary from the [releases page](https://github.com/FRI-DAY/oauth2-dev-proxy/releases) and make it executable:
 
-    VERSION="0.0.1-alpha1"; OS="darwin" # or linux or windows
+    VERSION="0.0.1"; OS="darwin" # or linux or windows
     curl --silent --location https://github.com/FRI-DAY/oauth2-dev-proxy/releases/download/v${VERSION}/oauth2-dev-proxy_${VERSION}_${OS}_amd64 \
       > /usr/local/bin/oauth2-dev-proxy && \
     chmod +x /usr/local/bin/oauth2-dev-proxy
